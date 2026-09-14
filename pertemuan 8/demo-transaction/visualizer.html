@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visualizer Transaksi & ACID - Modul Backend 8</title>
+<style>
+  /* radius: 6px untuk semua panel, kartu, dan kontrol. Baris log rata (0) karena
+     isinya keluaran terminal, bukan container. */
+  :root{
+    --bg:#0e0f11; --surface:#16171a; --surface-2:#1b1c20; --inset:#101115;
+    --line:#2b2d33; --line-strong:#3a3d45;
+    --ink:#e7e8ec; --dim:#9aa1ad; --code:#b9ccf0;
+    --accent:#5b9dff; --good:#3ecf8e; --bad:#ff6b6b; --warn:#e8b84b;
+    --r:6px;
+    --mono:"JetBrains Mono","Cascadia Mono",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:var(--mono);font-size:15px;line-height:1.6;min-height:100vh}
+  .wrap{max-width:940px;margin:0 auto;padding:32px 20px 72px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+         padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:20px;flex-wrap:wrap}
+  h1{font-size:19px;font-weight:600;margin:0;letter-spacing:-0.01em}
+  .meta{color:var(--dim);font-size:12.5px}
+  .intro{color:var(--dim);font-size:13px;margin:0 0 20px;max-width:62ch}
+
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+  .tab{background:transparent;border:1px solid var(--line);color:var(--dim);
+       padding:7px 13px;border-radius:var(--r);cursor:pointer;
+       font-family:var(--mono);font-size:13px;transition:color .15s,border-color .15s,background .15s}
+  .tab:hover{color:var(--ink);border-color:var(--line-strong)}
+  .tab.active{color:var(--ink);border-color:var(--accent);background:rgba(91,157,255,.1)}
+
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+  .panel h2{font-size:15px;font-weight:600;margin:0 0 4px}
+  .panel .desc{color:var(--dim);font-size:13px;margin:0 0 16px;max-width:66ch}
+
+  .controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  button.action{font-family:var(--mono);font-size:13px;padding:8px 15px;border-radius:var(--r);
+                cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--dim);
+                transition:color .15s,border-color .15s,background .15s}
+  button.action:hover{color:var(--ink);border-color:var(--line-strong)}
+  button.action:active{transform:translateY(1px)}
+  button.action.primary{background:var(--accent);border-color:var(--accent);color:#0e0f11;font-weight:600}
+  button.action.primary:hover{background:#7aafff;border-color:#7aafff}
+  button.action:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  .speed{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px;margin-left:auto}
+  input[type=range]{accent-color:var(--accent);width:150px}
+  .progress{color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums}
+
+  .balances{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .acct{flex:1;min-width:160px;background:var(--surface-2);border:1px solid var(--line);
+        border-radius:var(--r);padding:12px 14px;transition:box-shadow .2s,background .2s}
+  .acct .name{font-size:12px;color:var(--dim)}
+  .acct .val{font-size:22px;margin-top:4px;font-variant-numeric:tabular-nums}
+  .acct.flash-down{box-shadow:0 0 0 2px var(--bad);background:#241417}
+  .acct.flash-up{box-shadow:0 0 0 2px var(--good);background:#0f2419}
+  .acct.flash-neutral{box-shadow:0 0 0 2px var(--warn);background:#241f0f}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:720px){.cols{grid-template-columns:1fr}}
+  .col{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+  .col h3{font-size:13px;font-weight:600;margin:0 0 10px}
+  .col.bad h3{color:var(--bad)} .col.good h3{color:var(--good)}
+  .log{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow-y:auto;padding-right:4px}
+  .line{opacity:0;transform:translateY(3px);transition:opacity .2s,transform .2s;
+        border-left:2px solid var(--line);background:var(--inset);
+        padding:7px 10px;font-size:13px;white-space:pre-wrap;word-break:break-word}
+  .line.show{opacity:1;transform:none}
+  .line.sql{border-left-color:var(--accent);color:var(--code)}
+  .line.ok{border-left-color:var(--good);color:var(--good)}
+  .line.err{border-left-color:var(--bad);color:var(--bad)}
+  .line.warn{border-left-color:var(--warn);color:var(--warn)}
+  .line.note{border-left-color:var(--line-strong);color:var(--dim)}
+
+  .verdict{margin-top:14px;background:var(--surface-2);border:1px solid var(--line);
+           border-left:3px solid var(--accent);border-radius:var(--r);padding:13px 16px}
+  .verdict .label{font-size:11.5px;color:var(--dim);margin-bottom:4px}
+  .verdict .body{font-size:13.5px}
+
+  .codeblock{background:var(--inset);border:1px solid var(--line);border-radius:var(--r);
+             padding:12px;overflow:auto;font-size:12.5px;color:var(--code);
+             white-space:pre;margin-top:14px;max-height:230px}
+  .hint{color:var(--dim);font-size:12px;margin-top:12px}
+  footer{color:var(--dim);font-size:12px;text-align:center;margin-top:28px}
+
+  @media (prefers-reduced-motion: reduce){
+    .line{transition:none;opacity:1;transform:none}
+    button.action:active{transform:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Visualizer Transaksi &amp; ACID</h1>
+    <div class="meta">Modul Backend 8 &middot; Go + PostgreSQL</div>
+  </header>
+
+  <p class="intro">Langkah muncul satu per satu supaya bisa dibaca. Atur jeda di kanan, lalu tekan Mulai, atau maju manual dengan Lanjut.</p>
+
+  <div class="tabs" id="tabs"></div>
+
+  <section class="panel">
+    <h2 id="sceneTitle"></h2>
+    <p class="desc" id="sceneDesc"></p>
+
+    <div class="controls">
+      <button class="action primary" id="runBtn">Mulai</button>
+      <button class="action" id="stepBtn">Lanjut</button>
+      <button class="action" id="resetBtn">Ulangi</button>
+      <div class="speed">
+        <label for="speed">Jeda</label>
+        <input type="range" id="speed" min="150" max="1600" value="800" step="50">
+        <span id="speedLabel">800 ms</span>
+      </div>
+    </div>
+    <div class="progress" id="progress">langkah 0 / 0</div>
+
+    <div class="balances" id="balances"></div>
+
+    <div class="cols">
+      <div class="col bad">
+        <h3 id="headBad"></h3>
+        <div class="log" id="logBad"></div>
+      </div>
+      <div class="col good">
+        <h3 id="headGood"></h3>
+        <div class="log" id="logGood"></div>
+      </div>
+    </div>
+
+    <div class="verdict">
+      <div class="label">Kesimpulan</div>
+      <div class="body" id="verdictBody">Pilih skenario lalu mulai untuk melihat hasilnya.</div>
+    </div>
+
+    <div class="codeblock" id="codeNote"></div>
+    <p class="hint">Pakai Lanjut untuk maju satu langkah saat presentasi. Pakai Mulai untuk menjalankannya otomatis.</p>
+  </section>
+
+  <footer>Demo transaksi &middot; Modul Backend 8 &middot; Go + PostgreSQL</footer>
+</div>
+
+<script>
+"use strict";
+
+const speedInput = document.getElementById("speed");
+const speedLabel = document.getElementById("speedLabel");
+speedInput.addEventListener("input", () => { speedLabel.textContent = speedInput.value + " ms"; });
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmt = n => n.toLocaleString("id-ID");
+
+// step: { side:"bad"|"good"|"both", type:"sql"|"ok"|"err"|"warn"|"note",
+//         text, balance?:{ key:value, flash:"down:key"|"up:key"|"neutral:key"|"none" },
+//         delay?: override jeda }
+
+const SCENARIOS = {
+  transfer: {
+    tab: "Transfer",
+    title: "Transfer yang gagal di tengah jalan",
+    desc: "Siti mengirim 950.000 ke Budi. Langkah kedua sengaja dibuat gagal karena saldo Budi akan melewati batas 1.000.000. Tanpa transaksi, potongan Siti tetap tersimpan. Dengan transaksi, semuanya dibatalkan.",
+    columns: { bad: "Tanpa transaksi", good: "Dengan transaksi" },
+    accounts: [
+      { key: "siti", name: "Siti (pengirim)", start: 1000000 },
+      { key: "budi", name: "Budi (penerima)", start: 900000 },
+    ],
+    code: `BEGIN;
+  SELECT balance FROM accounts WHERE id = 2;   -- Siti 1.000.000
+  UPDATE accounts SET balance = balance - 950000 WHERE id = 2;
+  SELECT balance FROM accounts WHERE id = 1;   -- Budi 900.000
+  UPDATE accounts SET balance = balance + 950000 WHERE id = 1;  -- melanggar CHECK
+ROLLBACK;   -- kalau tidak di-commit, semua kembali`,
+    steps: [
+      { side:"both",  type:"note",    text:"Saldo awal: Siti 1.000.000, Budi 900.000." },
+      { side:"bad",   type:"sql",     text:"UPDATE accounts SET balance = balance - 950000 WHERE id = Siti;" },
+      { side:"bad",   type:"ok",      text:"Berhasil. Saldo Siti jadi 50.000 dan langsung tersimpan." },
+      { side:"both",  type:"balance", text:"Siti 1.000.000 jadi 50.000", balance:{ siti:50000, flash:"down:siti" } },
+      { side:"bad",   type:"sql",     text:"UPDATE accounts SET balance = balance + 950000 WHERE id = Budi;" },
+      { side:"bad",   type:"err",     text:"Gagal. Melanggar check constraint accounts_balance_check." },
+      { side:"good",  type:"sql",     text:"BEGIN;" },
+      { side:"good",  type:"sql",     text:"UPDATE accounts SET balance = balance - 950000 WHERE id = Siti;" },
+      { side:"good",  type:"ok",      text:"Berhasil di dalam transaksi. Belum di-commit." },
+      { side:"good",  type:"sql",     text:"UPDATE accounts SET balance = balance + 950000 WHERE id = Budi;" },
+      { side:"good",  type:"err",     text:"Gagal. Melanggar check constraint accounts_balance_check." },
+      { side:"good",  type:"warn",    text:"defer Rollback aktif, jalankan ROLLBACK." },
+      { side:"good",  type:"balance", text:"Siti kembali ke 1.000.000. Tidak ada yang berubah.", balance:{ siti:1000000, flash:"neutral:siti" } },
+      { side:"both",  type:"note",    text:"Selesai." },
+    ],
+    verdict: "Tanpa transaksi, Siti kehilangan 950.000 sementara Budi tidak menerima apa pun. Dengan transaksi, seluruh perubahan dibatalkan dan saldo kembali utuh.",
+  },
+
+  vote: {
+    tab: "Voting",
+    title: "1000 klik voting bersamaan",
+    desc: "1000 orang menekan tombol Vote di detik yang sama. Tanpa locking, banyak yang membaca angka lama lalu saling menimpa. Dengan SELECT ... FOR UPDATE, satu klik jadi satu vote.",
+    columns: { bad: "Tanpa locking", good: "Dengan locking" },
+    accounts: [
+      { key: "unsafe", name: "Vote tercatat", start: 0 },
+      { key: "safe", name: "Vote tercatat", start: 0 },
+    ],
+    code: `BEGIN;
+  SELECT votes FROM contests WHERE id = 1 FOR UPDATE;   -- kunci baris
+  UPDATE contests SET votes = votes + 1 WHERE id = 1;
+COMMIT;   -- transaksi lain menunggu lock ini`,
+    steps: makeVoteSteps(),
+    verdict: "Tanpa locking, 960 klik tidak tercatat. Dengan FOR UPDATE, tiap kenaikan memakai angka terbaru, jadi 1000 klik tercatat 1000.",
+  },
+
+  pay: {
+    tab: "Double bayar",
+    title: "Tombol Bayar ditekan dua kali",
+    desc: "User menekan Bayar dua kali karena jaringan lambat. Tanpa idempotency key, saldo terpotong dua kali. Dengan key yang sama, permintaan kedua diabaikan.",
+    columns: { bad: "Tanpa idempotency", good: "Dengan idempotency" },
+    accounts: [
+      { key: "unsafe", name: "Saldo", start: 100000 },
+      { key: "safe", name: "Saldo", start: 100000 },
+    ],
+    code: `BEGIN;
+  INSERT INTO ledger (idempotency_key, amount)
+    VALUES ('order-12345', 30000)
+    ON CONFLICT (idempotency_key) DO NOTHING;   -- klik kedua menghasilkan 0 row
+  UPDATE accounts SET balance = balance - 30000 WHERE id = 1;
+COMMIT;`,
+    steps: [
+      { side:"both",  type:"note",    text:"Saldo awal 100.000. Harga 30.000. Klik pertama dan kedua datang bersamaan." },
+      { side:"bad",   type:"note",    text:"Klik pertama diproses sebagai transaksi baru." },
+      { side:"bad",   type:"sql",     text:"UPDATE accounts SET balance = balance - 30000;" },
+      { side:"bad",   type:"balance", text:"Klik pertama. Saldo jadi 70.000.", balance:{ unsafe:70000, flash:"down:unsafe" } },
+      { side:"bad",   type:"note",    text:"Klik kedua juga diproses sebagai transaksi baru." },
+      { side:"bad",   type:"sql",     text:"UPDATE accounts SET balance = balance - 30000;" },
+      { side:"bad",   type:"err",     text:"Saldo jadi 40.000. Terbayar dua kali untuk produk yang sama." },
+      { side:"bad",   type:"balance", text:"Klik kedua. Saldo jadi 40.000.", balance:{ unsafe:40000, flash:"down:unsafe" } },
+      { side:"good",  type:"sql",     text:"BEGIN;" },
+      { side:"good",  type:"sql",     text:"INSERT INTO ledger ... ON CONFLICT (idempotency_key) DO NOTHING;   -- 1 row" },
+      { side:"good",  type:"sql",     text:"UPDATE accounts SET balance = balance - 30000;" },
+      { side:"good",  type:"ok",      text:"COMMIT. Klik pertama sukses." },
+      { side:"good",  type:"balance", text:"Klik pertama. Saldo jadi 70.000.", balance:{ safe:70000, flash:"down:safe" } },
+      { side:"good",  type:"sql",     text:"BEGIN;  INSERT ... ON CONFLICT DO NOTHING;   -- 0 row" },
+      { side:"good",  type:"warn",    text:"Key sudah dipakai. Kembalikan ErrDuplicate, tidak ada UPDATE, ROLLBACK." },
+      { side:"good",  type:"ok",      text:"Saldo tetap 70.000. Hanya dibayar sekali." },
+      { side:"both",  type:"note",    text:"Selesai." },
+    ],
+    verdict: "Tanpa idempotency, saldo dipotong dua kali jadi 40.000. Dengan key yang sama, permintaan kedua ditolak dan saldo tetap 70.000.",
+  },
+};
+
+function makeVoteSteps(){
+  const total = 1000, unsafe = 40, safe = 1000;
+  const steps = [
+    { side:"both", type:"note", text: total + " goroutine menekan tombol Vote di detik yang sama." },
+    { side:"bad",  type:"sql",  text:"SELECT votes FROM contests WHERE id = 1;  UPDATE contests SET votes = votes + 1;" },
+    { side:"bad",  type:"note", text:"Banyak goroutine membaca angka lama yang sama, lalu saling menimpa." },
+  ];
+  for (const v of [5, 18, 31, unsafe]) {
+    steps.push({ side:"bad", type:"balance", delay:300,
+      text:"... vote tercatat: " + v, balance:{ unsafe:v, flash:"none" } });
+  }
+  steps.push({ side:"bad", type:"err", text:"Selesai. Dari " + total + " klik, hanya " + unsafe + " yang tercatat." });
+
+  steps.push({ side:"good", type:"sql",  text:"BEGIN;  SELECT votes FROM contests WHERE id = 1 FOR UPDATE;  UPDATE ...;  COMMIT;" });
+  steps.push({ side:"good", type:"note", text:"Tiap transaksi menunggu lock baris. Tidak ada yang menimpa." });
+  for (const v of [120, 430, 780, safe]) {
+    steps.push({ side:"good", type:"balance", delay:300,
+      text:"... vote tercatat: " + v, balance:{ safe:v, flash:"none" } });
+  }
+  steps.push({ side:"good", type:"ok", text:"Selesai. " + total + " klik, " + safe + " vote tercatat." });
+  steps.push({ side:"both", type:"note", text:"Selesai." });
+  return steps;
+}
+
+const tabsEl   = document.getElementById("tabs");
+const titleEl  = document.getElementById("sceneTitle");
+const descEl   = document.getElementById("sceneDesc");
+const headBad  = document.getElementById("headBad");
+const headGood = document.getElementById("headGood");
+const logBad   = document.getElementById("logBad");
+const logGood  = document.getElementById("logGood");
+const balEl    = document.getElementById("balances");
+const progress = document.getElementById("progress");
+const verdictBody = document.getElementById("verdictBody");
+const codeNote = document.getElementById("codeNote");
+const runBtn   = document.getElementById("runBtn");
+const stepBtn  = document.getElementById("stepBtn");
+const resetBtn = document.getElementById("resetBtn");
+
+let currentKey = "transfer";
+let steps = [];
+let index = 0;
+let playing = false;
+let balances = {};
+
+Object.keys(SCENARIOS).forEach((key, i) => {
+  const b = document.createElement("button");
+  b.className = "tab" + (i === 0 ? " active" : "");
+  b.textContent = SCENARIOS[key].tab;
+  b.dataset.key = key;
+  b.onclick = () => selectScene(key);
+  tabsEl.appendChild(b);
+});
+
+function baseBalances(){
+  const out = {};
+  for (const a of SCENARIOS[currentKey].accounts) out[a.key] = a.start;
+  return out;
+}
+
+function renderBalances(){
+  balEl.innerHTML = "";
+  for (const a of SCENARIOS[currentKey].accounts) {
+    const card = document.createElement("div");
+    card.className = "acct";
+    card.id = "acct-" + a.key;
+    card.innerHTML = '<div class="name">' + a.name + '</div><div class="val">' + fmt(balances[a.key]) + '</div>';
+    balEl.appendChild(card);
+  }
+}
+
+function selectScene(key){
+  currentKey = key;
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.key === key));
+
+  const s = SCENARIOS[key];
+  titleEl.textContent = s.title;
+  descEl.textContent = s.desc;
+  codeNote.textContent = s.code;
+  headBad.textContent = s.columns.bad;
+  headGood.textContent = s.columns.good;
+
+  steps = s.steps.slice();
+  balances = baseBalances();
+  index = 0;
+  playing = false;
+  logBad.innerHTML = "";
+  logGood.innerHTML = "";
+  renderBalances();
+  updateProgress();
+  verdictBody.textContent = "Pilih skenario lalu mulai untuk melihat hasilnya.";
+  runBtn.disabled = false;
+  stepBtn.disabled = false;
+}
+
+function updateProgress(){
+  progress.textContent = "langkah " + index + " / " + steps.length;
+}
+
+function addLine(side, type, text){
+  const target = side === "bad" ? logBad : logGood;
+  const el = document.createElement("div");
+  el.className = "line " + type;
+  el.textContent = text;
+  target.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  target.scrollTop = target.scrollHeight;
+}
+
+function applyBalance(b){
+  if (!b) return;
+  Object.entries(b).forEach(([k, v]) => { if (typeof v === "number") balances[k] = v; });
+  renderBalances();
+  const flash = b.flash;
+  if (flash && flash !== "none"){
+    const [dir, key] = flash.split(":");
+    const card = document.getElementById("acct-" + key);
+    if (card){
+      const cls = dir === "down" ? "flash-down" : dir === "up" ? "flash-up" : "flash-neutral";
+      card.classList.add(cls);
+      setTimeout(() => card.classList.remove("flash-down", "flash-up", "flash-neutral"), 900);
+    }
+  }
+}
+
+function performStep(){
+  if (index >= steps.length) return false;
+  const st = steps[index++];
+  if (st.side === "both"){
+    addLine("bad", st.type, st.text);
+    addLine("good", st.type, st.text);
+  } else {
+    addLine(st.side, st.type, st.text);
+  }
+  applyBalance(st.balance);
+  updateProgress();
+  return true;
+}
+
+async function play(){
+  if (playing) return;
+  playing = true;
+  runBtn.disabled = true;
+  stepBtn.disabled = true;
+  while (playing && index < steps.length){
+    const st = steps[index];
+    performStep();
+    await sleep(st.delay || Number(speedInput.value));
+  }
+  playing = false;
+  runBtn.disabled = false;
+  stepBtn.disabled = false;
+  if (index >= steps.length) finish();
+}
+
+function finish(){
+  verdictBody.textContent = SCENARIOS[currentKey].verdict;
+  stepBtn.disabled = true;
+}
+
+runBtn.onclick = () => play();
+stepBtn.onclick = () => {
+  if (playing) return;
+  if (performStep() && index >= steps.length) finish();
+};
+resetBtn.onclick = () => selectScene(currentKey);
+
+selectScene("transfer");
+</script>
+</body>
+</html>

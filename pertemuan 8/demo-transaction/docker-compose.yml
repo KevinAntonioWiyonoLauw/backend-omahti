@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: omahti-tx-demo
+    environment:
+      POSTGRES_USER: omahti
+      POSTGRES_PASSWORD: omahti
+      POSTGRES_DB: wallet
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omahti -d wallet"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - ./schema.sql:/docker-entrypoint-initdb.d/00-schema.sql:ro
