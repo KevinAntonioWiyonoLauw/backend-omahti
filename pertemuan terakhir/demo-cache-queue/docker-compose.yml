@@ -1,0 +1,63 @@
+# Redis + RabbitMQ + Backend dalam satu perintah: docker compose up --build
+# Dashboard: http://localhost:18000
+# RabbitMQ Management: http://localhost:25673 (guest / guest)
+#
+# Port di host sengaja digeser ke rentang belasan ribu supaya tidak bentrok
+# dengan Redis/RabbitMQ/web server yang biasanya sudah jalan di laptop.
+# Semua bisa diubah tanpa menyentuh file ini — cukup timpa lewat .env.
+
+name: omahti-cache-queue
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: omahti-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_HOST_PORT:-16380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: omahti-rabbitmq
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "${AMQP_HOST_PORT:-15673}:5672"    # AMQP
+      - "${MGMT_HOST_PORT:-25673}:15672"  # Management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+    container_name: omahti-backend
+    environment:
+      # ADDR adalah port DI DALAM container; 8000 dipakai supaya selaras dengan
+      # URL yang dibuka mahasiswa.
+      ADDR: ":8000"
+      MODE: "strict"                       # strict: backend menolak naik kalau Redis/RabbitMQ mati
+      REDIS_URL: "redis://redis:6379/0"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      QUEUE_NAME: "orders_queue"
+      CACHE_TTL: "15s"                     # umur cache produk
+      DB_LATENCY: "2s"                     # simulasi query database lambat
+      WORKERS: "1"                         # naikkan ke 3 untuk menunjukkan paralelisme
+      STATIC_DIR: "/app/web"
+    ports:
+      - "${BACKEND_HOST_PORT:-18000}:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped

@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Cache &amp; Queue - Modul Backend Terakhir</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%230e0f11'/><rect x='3' y='4' width='10' height='2' fill='%235b9dff'/><rect x='3' y='7.5' width='10' height='2' fill='%233ecf8e'/><rect x='3' y='11' width='6' height='2' fill='%23e8b84b'/></svg>">
+<style>
+  /* Radius 6px untuk semua panel & kontrol. Baris log rata (0) karena isinya
+     keluaran terminal, bukan container.
+
+     Tipografi: Plus Jakarta Sans untuk seluruh teks antarmuka. Mono hanya
+     dipakai di tempat yang isinya memang kode/angka (blok kode, log, id order,
+     angka statistik) supaya kolomnya rata. Ukuran sans dinaikkan 1-2px dari
+     versi mono: huruf sans punya x-height lebih kecil, dan di 13px terasa
+     terlalu mungil di proyektor kelas. */
+  @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+
+  :root{
+    --bg:#0e0f11; --surface:#16171a; --surface-2:#1b1c20; --inset:#101115;
+    --line:#2b2d33; --line-strong:#3a3d45;
+    --ink:#e7e8ec; --dim:#9aa1ad; --code:#b9ccf0;
+    --accent:#5b9dff; --good:#3ecf8e; --bad:#ff6b6b; --warn:#e8b84b;
+    --r:6px;
+    /* Plus Jakarta Sans butuh fallback system sans sebelum generic sans-serif. */
+    --sans:"Plus Jakarta Sans","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"JetBrains Mono","Cascadia Mono",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:var(--sans);font-size:15px;line-height:1.65;min-height:100vh;
+       -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  .wrap{max-width:1200px;margin:0 auto;padding:32px 22px 80px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+         padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:20px;flex-wrap:wrap}
+  h1{font-size:24px;font-weight:700;margin:0;letter-spacing:-0.02em}
+  .meta{color:var(--dim);font-size:13px;font-weight:500}
+  .intro{color:var(--dim);font-size:14.5px;margin:0 0 20px;max-width:80ch;line-height:1.7}
+  .intro b{color:var(--ink);font-weight:600}
+
+  .topbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:20px}
+  .pill{display:inline-flex;align-items:center;gap:7px;background:var(--surface);
+        border:1px solid var(--line);border-radius:var(--r);padding:7px 12px;
+        font-size:12.5px;color:var(--dim);font-weight:500}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--line-strong);flex:none}
+  .dot.on{background:var(--good);box-shadow:0 0 6px var(--good)}
+  .dot.off{background:var(--bad)}
+  .pill b{color:var(--ink);font-weight:600}
+  .pill b.mono{font-family:var(--mono);font-size:12px;font-weight:500}
+  .spacer{margin-left:auto}
+
+  button.action{font-family:var(--sans);font-size:14px;font-weight:600;padding:9px 16px;
+                border-radius:var(--r);cursor:pointer;border:1px solid var(--line);
+                background:transparent;color:var(--dim);letter-spacing:-0.01em;
+                transition:color .15s,border-color .15s,background .15s}
+  button.action:hover{color:var(--ink);border-color:var(--line-strong)}
+  button.action:active{transform:translateY(1px)}
+  button.action.primary{background:var(--accent);border-color:var(--accent);color:#0e0f11;font-weight:700}
+  button.action.primary:hover{background:#7aafff;border-color:#7aafff}
+  button.action.good{background:var(--good);border-color:var(--good);color:#0e0f11;font-weight:700}
+  button.action.good:hover{filter:brightness(1.12)}
+  button.action:disabled{opacity:.45;cursor:not-allowed;transform:none}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  @media(max-width:980px){.grid{grid-template-columns:1fr}}
+
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px}
+  .panel h2{font-size:17px;font-weight:700;margin:0 0 6px;display:flex;align-items:center;
+            gap:9px;letter-spacing:-0.01em}
+  .panel h2 .tag{font-size:11px;font-weight:600;color:var(--dim);border:1px solid var(--line);
+                 border-radius:var(--r);padding:2px 8px;letter-spacing:0;text-transform:lowercase}
+  .panel .desc{color:var(--dim);font-size:13.5px;margin:0 0 16px;max-width:66ch;line-height:1.7}
+  .panel h3{font-size:11.5px;font-weight:700;margin:20px 0 9px;color:var(--dim);
+            text-transform:uppercase;letter-spacing:.08em}
+
+  .controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  select{font-family:var(--sans);font-size:13.5px;font-weight:500;background:var(--inset);
+         color:var(--ink);border:1px solid var(--line);border-radius:var(--r);
+         padding:9px 10px;cursor:pointer}
+
+  /* Hasil satu kali fetch */
+  .result{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);
+          padding:14px 16px;margin-bottom:14px;transition:box-shadow .2s,border-color .2s}
+  .result.hit{box-shadow:inset 3px 0 0 var(--good);border-color:#2b4a3a}
+  .result.miss{box-shadow:inset 3px 0 0 var(--warn);border-color:#4a3f24}
+  .result .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .result .badge{font-size:11.5px;padding:3px 10px;border-radius:var(--r);border:1px solid;
+                 font-weight:700;letter-spacing:.01em}
+  .badge.redis{color:var(--good);border-color:#2b4a3a;background:#0f2419}
+  .badge.db{color:var(--warn);border-color:#4a3f24;background:#241f0f}
+  .result .name{font-size:14.5px;font-weight:600}
+  .result .ms{margin-left:auto;font-size:23px;font-weight:700;font-family:var(--mono);
+              font-variant-numeric:tabular-nums;letter-spacing:-0.02em}
+  .result .ms.fast{color:var(--good)} .result .ms.slow{color:var(--warn)}
+  .result .sub{color:var(--dim);font-size:12.5px;margin-top:6px;line-height:1.6}
+
+  /* Grafik latensi sederhana: bar chart CSS, bukan library.
+     Bar mengisi tinggi; lebarnya tetap supaya tetap terbaca sebagai kolom
+     saat baru ada dua titik data. */
+  .chart{display:flex;align-items:flex-end;gap:4px;height:90px;padding:8px 10px;
+         background:var(--inset);border:1px solid var(--line);border-radius:var(--r);
+         overflow-x:auto;overflow-y:hidden;margin-bottom:8px}
+  .chart .bar{width:14px;flex:none;border-radius:2px 2px 0 0;background:var(--warn);
+              transform-origin:bottom;animation:grow .25s ease-out}
+  .chart .bar:hover{filter:brightness(1.25)}
+  .chart .bar.hit{background:var(--good)}
+  @keyframes grow{from{transform:scaleY(.05);opacity:.4}to{transform:none;opacity:1}}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:500}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+  .legend .hit i{background:var(--good)} .legend .miss i{background:var(--warn)}
+
+  .statrow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+  .stat{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+  .stat .k{font-size:11px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+  .stat .v{font-size:19px;font-weight:700;font-family:var(--mono);
+           font-variant-numeric:tabular-nums;margin-top:3px}
+
+  /* Pipeline RabbitMQ */
+  .pipeline{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:14px}
+  .stage{position:relative;display:flex;align-items:center;gap:13px;padding:12px 14px;
+         background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);
+         transition:border-color .2s,box-shadow .2s,background .2s}
+  .stage .ico{width:28px;height:28px;border-radius:var(--r);border:1px solid var(--line-strong);
+              display:grid;place-items:center;font-size:13px;font-weight:700;color:var(--dim);
+              flex:none;font-family:var(--mono);
+              transition:color .2s,border-color .2s,background .2s}
+  .stage .label{font-size:14px;font-weight:600;letter-spacing:-0.01em}
+  .stage .label small{display:block;color:var(--dim);font-size:12px;line-height:1.5;
+                      margin-top:1px;font-weight:400;letter-spacing:0}
+  .stage .count{margin-left:auto;font-size:12px;color:var(--dim);font-weight:600;
+                font-variant-numeric:tabular-nums;white-space:nowrap}
+  .stage.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 18px -6px var(--accent)}
+  .stage.active .ico{color:var(--accent);border-color:var(--accent);background:rgba(91,157,255,.1)}
+  .stage.done{border-color:#2b4a3a;background:#101b16}
+  .stage.done .ico{color:var(--good);border-color:#2b4a3a;background:#0f2419}
+  .stage.fail{border-color:#4a2426;background:#1b1113}
+  .stage.fail .ico{color:var(--bad);border-color:#4a2426;background:#241417}
+  .stage.flash{animation:flash .5s ease-out}
+  @keyframes flash{0%{background:#1d2633}100%{background:var(--surface-2)}}
+
+  .connector{height:8px;margin-left:27px;border-left:1px dashed var(--line-strong);
+             position:relative;overflow:hidden}
+  .connector .packet{position:absolute;left:-2px;width:5px;height:5px;border-radius:50%;
+                     background:var(--accent);opacity:0;box-shadow:0 0 8px var(--accent)}
+  .connector.flow .packet{animation:drop .55s linear infinite}
+  @keyframes drop{0%{top:-6px;opacity:0}30%{opacity:1}100%{top:100%;opacity:0}}
+
+  .orders{max-height:220px;overflow-y:auto;padding-right:4px}
+  .order{display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;
+         border-left:2px solid var(--line);background:var(--inset);padding:8px 11px;
+         font-size:13px;margin-bottom:5px;border-radius:0 var(--r) var(--r) 0;
+         transition:border-color .2s,background .2s}
+  .order .id{color:var(--code);font-family:var(--mono);font-size:12.5px}
+  .order .who{color:var(--dim);font-weight:500}
+  .order .st{font-size:11px;padding:2px 9px;border-radius:var(--r);border:1px solid;
+             font-weight:700;font-family:var(--mono)}
+  .order .st.queued{color:var(--warn);border-color:#4a3f24}
+  .order .st.consumed{color:var(--accent);border-color:#2b3f60}
+  .order .st.processed{color:var(--good);border-color:#2b4a3a}
+  .order .st.failed{color:var(--bad);border-color:#4a2426}
+  .order.new{border-left-color:var(--accent);background:#141a23}
+
+  /* Log terminal: mono karena isinya keluaran proses, bukan teks naratif */
+  .log{display:flex;flex-direction:column;gap:5px;max-height:34vh;overflow-y:auto;
+       padding-right:4px;margin-top:8px}
+  .line{opacity:0;transform:translateY(3px);transition:opacity .2s,transform .2s;
+        border-left:2px solid var(--line);background:var(--inset);
+        padding:7px 11px;font-size:12.5px;white-space:pre-wrap;word-break:break-word;
+        font-family:var(--mono);line-height:1.6}
+  .line.show{opacity:1;transform:none}
+  .line.redis{border-left-color:var(--good);color:var(--good)}
+  .line.db{border-left-color:var(--warn);color:var(--warn)}
+  .line.broker{border-left-color:var(--accent);color:var(--code)}
+  .line.worker{border-left-color:#b28bff;color:#cdbaff}
+  .line.ok{border-left-color:var(--good);color:var(--good)}
+  .line.err{border-left-color:var(--bad);color:var(--bad)}
+  .line.note{border-left-color:var(--line-strong);color:var(--dim)}
+  .line .t{color:var(--line-strong);margin-right:8px}
+
+  .codeblock{background:var(--inset);border:1px solid var(--line);border-radius:var(--r);
+             padding:14px;overflow:auto;font-size:12.5px;color:var(--code);
+             white-space:pre;margin-top:16px;max-height:280px;line-height:1.7;
+             font-family:var(--mono)}
+  .hint{color:var(--dim);font-size:12.5px;margin-top:12px;line-height:1.6}
+  footer{color:var(--dim);font-size:12.5px;text-align:center;margin-top:32px}
+
+  @media (prefers-reduced-motion: reduce){
+    .line{transition:none;opacity:1;transform:none}
+    .chart .bar{animation:none}
+    .connector.flow .packet{animation:none;opacity:.6;top:40%}
+    .stage.flash{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Dashboard Cache &amp; Queue</h1>
+    <div class="meta">Modul Backend Terakhir &middot; Go + Redis + RabbitMQ</div>
+  </header>
+
+  <p class="intro">
+    Dua demo sekaligus. Kiri: beda <b>2.000 ms</b> melawan <b>&lt;5 ms</b> saat data diambil dari cache.
+    Kanan: order tidak diproses di request, hanya dilempar ke broker lalu diambil worker.
+    Semua animasi kanan digerakkan event dari server lewat SSE, bukan animasi palsu di browser.
+  </p>
+
+  <div class="topbar">
+    <span class="pill"><span class="dot" id="dotSse"></span> SSE <b id="sseState">menghubungkan</b></span>
+    <span class="pill"><span class="dot" id="dotCache"></span> cache <b id="cacheBackend">-</b></span>
+    <span class="pill"><span class="dot" id="dotBroker"></span> broker <b id="brokerBackend">-</b></span>
+    <span class="pill">queue <b id="queueName">orders_queue</b></span>
+    <span class="pill spacer">queue depth <b id="queueDepth">0</b></span>
+    <button class="action" id="resetBtn">Reset demo</button>
+  </div>
+
+  <div class="grid">
+    <!-- ============ SECTION A: REDIS ============ -->
+    <section class="panel">
+      <h2>Cache Redis <span class="tag">read path</span></h2>
+      <p class="desc">
+        Request pertama: cache kosong, handler memukul database yang lambat (<span id="dbLatencyLabel">2000</span> ms),
+        lalu hasilnya disimpan ke Redis. Request berikutnya selama TTL masih hidup dilayani langsung dari Redis.
+      </p>
+
+      <div class="controls">
+        <select id="productSelect" aria-label="Pilih produk"></select>
+        <button class="action primary" id="fetchBtn">Fetch produk</button>
+        <button class="action" id="evictBtn" title="Hapus key ini dari cache">Hapus dari cache</button>
+      </div>
+
+      <div class="result" id="resultBox">
+        <div class="row">
+          <span class="badge" id="resultBadge" style="display:none"></span>
+          <span class="name" id="resultName">Belum ada data</span>
+          <span class="ms" id="resultMs">-</span>
+        </div>
+        <div class="sub" id="resultSub">Tekan Fetch produk untuk memulai.</div>
+      </div>
+
+      <h3>Latensi per fetch</h3>
+      <div class="legend">
+        <span class="hit"><i></i> cache hit (redis)</span>
+        <span class="miss"><i></i> cache miss (database)</span>
+      </div>
+      <div class="chart" id="chart"></div>
+      <div class="statrow">
+        <div class="stat"><div class="k">hit</div><div class="v" id="statHits">0</div></div>
+        <div class="stat"><div class="k">miss</div><div class="v" id="statMisses">0</div></div>
+        <div class="stat"><div class="k">hit ratio</div><div class="v" id="statRatio">0%</div></div>
+      </div>
+
+      <h3>Log</h3>
+      <div class="log" id="cacheLog"></div>
+
+      <div class="codeblock" id="codeCache">// pola cache-aside, bagian terpenting modul ini
+value, err := cache.Get(ctx, key)
+if err == nil {
+    return value              // hit: tidak menyentuh database
+}
+
+value := db.QuerySlow()       // miss: query mahal, 2 detik
+cache.Set(ctx, key, value, 15*time.Second)   // isi cache dengan TTL
+return value</div>
+    </section>
+
+    <!-- ============ SECTION B: RABBITMQ ============ -->
+    <section class="panel">
+      <h2>Queue RabbitMQ <span class="tag">write path</span></h2>
+      <p class="desc">
+        POST /order hanya publish pesan lalu balas <b>202 Accepted</b> dalam hitungan milidetik.
+        Worker mengambil pesan, memproses 3 detik, memperbarui status, lalu meng-ack pesan.
+      </p>
+
+      <div class="controls">
+        <select id="orderProduct" aria-label="Produk untuk order"></select>
+        <button class="action good" id="orderBtn">Place order</button>
+        <button class="action" id="burstBtn" title="Kirim 5 order sekaligus">Burst 5</button>
+      </div>
+
+      <div class="pipeline">
+        <div class="stage" id="stageProducer">
+          <div class="ico">1</div>
+          <div class="label">Producer <small>handler POST /api/order</small></div>
+          <div class="count" id="countProducer">-</div>
+        </div>
+        <div class="connector" id="conn1"><div class="packet"></div></div>
+        <div class="stage" id="stageBroker">
+          <div class="ico">2</div>
+          <div class="label">RabbitMQ Broker <small id="brokerSub">queue: orders_queue</small></div>
+          <div class="count" id="countBroker">0 pesan</div>
+        </div>
+        <div class="connector" id="conn2"><div class="packet"></div></div>
+        <div class="stage" id="stageConsumer">
+          <div class="ico">3</div>
+          <div class="label">Consumer / Worker <small id="consumerSub">mengambil pesan, prefetch 1</small></div>
+          <div class="count" id="countConsumer">-</div>
+        </div>
+        <div class="connector" id="conn3"><div class="packet"></div></div>
+        <div class="stage" id="stageDone">
+          <div class="ico">4</div>
+          <div class="label">Completed <small>status order diperbarui, pesan di-ack</small></div>
+          <div class="count" id="countDone">0 order</div>
+        </div>
+      </div>
+
+      <h3>Order</h3>
+      <div class="orders" id="orders"><div class="line note show">Belum ada order.</div></div>
+
+      <h3>Log</h3>
+      <div class="log" id="queueLog"></div>
+
+      <div class="codeblock" id="codeQueue">// handler: kerja minimal, sisanya diserahkan ke worker
+err := broker.Publish(ctx, "orders_queue", body)
+w.WriteHeader(http.StatusAccepted)   // 202: diterima, belum diproses
+json.NewEncoder(w).Encode(map[string]string{"order_id": id})
+
+// worker: di goroutine lain
+handler := func(msg, ack, nack) {
+    process(msg)        // 3 detik
+    updateStatus(msg)
+    ack(false)          // pesan baru dihapus dari queue setelah selesai
+}</div>
+      <p class="hint">Reset hanya membersihkan cache dan counter. Stok tidak dikembalikan, jadi perilaku "stok habis" tetap bisa diperagakan.</p>
+    </section>
+  </div>
+
+  <footer>Demo cache &amp; queue &middot; Modul Backend Terakhir &middot; Omah TI UGM</footer>
+</div>
+
+<script>
+"use strict";
+
+// Backend disajikan dari origin yang sama (GET /). Kalau index.html dibuka
+// langsung dari disk (file://), API diarahkan ke localhost:18000, atau bisa
+// ditimpa lewat atribut data-api pada <html>.
+const API_BASE = document.documentElement.dataset.api
+  || (location.protocol.startsWith("http") ? location.origin : "http://localhost:18000");
+
+/* ---------- helper dasar ---------- */
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmt = n => Number(n).toLocaleString("id-ID");
+
+function addLine(target, type, text){
+  const el = document.createElement("div");
+  el.className = "line " + type;
+  const t = document.createElement("span");
+  t.className = "t";
+  const d = new Date();
+  t.textContent = String(d.getHours()).padStart(2,"0") + ":" +
+                  String(d.getMinutes()).padStart(2,"0") + ":" +
+                  String(d.getSeconds()).padStart(2,"0");
+  el.appendChild(t);
+  el.appendChild(document.createTextNode(text));
+  target.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  // batasi jumlah baris supaya tidak makan memori saat demo panjang
+  while (target.children.length > 60) target.removeChild(target.firstChild);
+  target.scrollTop = target.scrollHeight;
+}
+
+async function api(path, options){
+  const res = await fetch(API_BASE + path, Object.assign({
+    headers: { "Content-Type": "application/json" }
+  }, options));
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(body.error || ("HTTP " + res.status));
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
+  return body;
+}
+
+// Varian POST /order yang mengembalikan status tanpa melempar error, karena
+// "stok habis" (409) adalah bagian dari cerita demo, bukan kegagalan aplikasi.
+async function placeOrderSafe(payload){
+  const res = await fetch(API_BASE + "/api/order", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body };
+}
+
+/* ---------- state ---------- */
+
+let products = [];
+let queueDepth = 0;
+let doneCount = 0;
+let producerCount = 0;
+const chartPoints = [];   // {ms, hit}
+const MAX_POINTS = 40;
+
+/* ---------- health & produk ---------- */
+
+async function loadHealth(){
+  try {
+    const h = await api("/api/health");
+    const cacheOk = h.status === "ok";
+    $("dotCache").className = "dot " + (cacheOk ? "on" : "off");
+    $("cacheBackend").textContent = h.cache;
+    $("dotBroker").className = "dot on";
+    $("brokerBackend").textContent = h.broker;
+    queueDepth = h.orders_queue_depth || 0;
+    renderQueueDepth();
+    // endpoint /api/health juga melaporkan nama queue lewat stats; label awal cukup.
+    $("queueName").textContent = "orders_queue";
+  } catch (e) {
+    $("dotCache").className = "dot off";
+    $("dotBroker").className = "dot off";
+    $("cacheBackend").textContent = "tidak terhubung";
+    addLine($("cacheLog"), "err", "tidak bisa menghubungi backend di " + API_BASE);
+  }
+}
+
+async function loadProducts(){
+  const data = await api("/api/products");
+  products = data.products || [];
+  const build = sel => {
+    sel.innerHTML = "";
+    for (const p of products){
+      const o = document.createElement("option");
+      o.value = p.id;
+      o.textContent = "#" + p.id + " " + p.name + " · stok " + p.stock;
+      sel.appendChild(o);
+    }
+  };
+  build($("productSelect"));
+  build($("orderProduct"));
+  $("orderProduct").value = "5"; // produk dengan stok paling sedikit
+
+  // label stok di dropdown ikut berubah setelah order diproses
+  window.refreshProductLabels = async () => {
+    const keepA = $("productSelect").value, keepB = $("orderProduct").value;
+    const fresh = await api("/api/products");
+    products = fresh.products || [];
+    build($("productSelect"));
+    build($("orderProduct"));
+    $("productSelect").value = keepA;
+    $("orderProduct").value = keepB;
+  };
+}
+
+/* ---------- SECTION A: redis ---------- */
+
+function renderChart(){
+  const chart = $("chart");
+  chart.innerHTML = "";
+  const max = Math.max(1, ...chartPoints.map(p => p.ms));
+  for (const p of chartPoints){
+    const bar = document.createElement("div");
+    bar.className = "bar" + (p.hit ? " hit" : "");
+    const h = Math.max(3, Math.round(p.ms / max * 100));
+    bar.style.height = h + "%";
+    bar.title = p.ms + " ms · " + (p.hit ? "redis" : "database");
+    chart.appendChild(bar);
+  }
+  chart.scrollLeft = chart.scrollWidth;
+}
+
+function pushPoint(ms, hit){
+  chartPoints.push({ ms, hit });
+  while (chartPoints.length > MAX_POINTS) chartPoints.shift();
+  renderChart();
+}
+
+function renderResult(data){
+  const box = $("resultBox");
+  const badge = $("resultBadge");
+  const hit = data.source === "redis";
+  box.className = "result " + (hit ? "hit" : "miss");
+  badge.style.display = "";
+  badge.className = "badge " + (hit ? "redis" : "db");
+  badge.textContent = hit ? "CACHE HIT · redis" : "CACHE MISS · database";
+  $("resultName").textContent = "#" + data.product.id + " " + data.product.name +
+    " · " + fmt(data.product.price_idr) + " IDR · stok " + data.product.stock;
+
+  const ms = $("resultMs");
+  ms.textContent = data.processing_time_ms + " ms";
+  ms.className = "ms " + (hit ? "fast" : "slow");
+
+  $("resultSub").textContent = hit
+    ? "dilayani " + data.cache + " dalam " + data.processing_time_ms + " ms · sisa TTL " +
+      data.cache_ttl_s + " s · database tidak disentuh"
+    : "query database " + data.db_time_ms + " ms · hasil disimpan ke " + data.cache +
+      " dengan TTL " + data.cache_ttl_s + " s · request berikutnya harusnya jauh lebih cepat";
+}
+
+async function fetchProduct(){
+  const id = $("productSelect").value;
+  const btn = $("fetchBtn");
+  btn.disabled = true;
+  const started = performance.now();
+  try {
+    const data = await api("/api/product/" + id);
+    renderResult(data);
+    pushPoint(data.processing_time_ms, data.source === "redis");
+    addLine($("cacheLog"), data.source === "redis" ? "redis" : "db",
+      (data.source === "redis" ? "HIT  " : "MISS ") + "product:" + data.product.id +
+      " → " + data.processing_time_ms + " ms (browser " + Math.round(performance.now() - started) + " ms)");
+    loadStats();
+  } catch (e) {
+    addLine($("cacheLog"), "err", "fetch gagal: " + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function evictProduct(){
+  const id = $("productSelect").value;
+  try {
+    await api("/api/product/" + id + "/cache", { method: "DELETE" });
+    addLine($("cacheLog"), "note", "DEL product:" + id + " → key dihapus, fetch berikutnya akan miss");
+  } catch (e) {
+    addLine($("cacheLog"), "err", "hapus cache gagal: " + e.message);
+  }
+}
+
+async function loadStats(){
+  try {
+    const s = await api("/api/stats");
+    const c = s.cache;
+    $("statHits").textContent = fmt(c.hits);
+    $("statMisses").textContent = fmt(c.misses);
+    $("statRatio").textContent = Math.round(c.hit_ratio) + "%";
+    if (!$("dotCache").classList.contains("off")){
+      $("cacheBackend").textContent = c.backend;
+      $("dotCache").className = "dot on";
+    }
+    $("brokerBackend").textContent = s.orders.broker;
+    $("brokerSub").textContent = "queue: " + s.orders.queue;
+    queueDepth = s.orders.queue_size;
+    renderQueueDepth();
+    doneCount = s.orders.processed;
+    $("countDone").textContent = doneCount + " order";
+    $("countProducer").textContent = s.orders.published + " dikirim";
+    $("countConsumer").textContent = s.orders.processed + " selesai";
+  } catch (e) { /* diam: health check yang melaporkan */ }
+}
+
+/* ---------- SECTION B: rabbitmq ---------- */
+
+function renderQueueDepth(){
+  $("countBroker").textContent = queueDepth + " pesan";
+  $("queueDepth").textContent = queueDepth;
+  if (queueDepth > 0){
+    $("stageBroker").classList.add("active");
+  } else if (!$("stageBroker").classList.contains("done")){
+    $("stageBroker").classList.remove("active");
+  }
+}
+
+function flash(el){
+  el.classList.remove("flash");
+  void el.offsetWidth;   // paksa reflow supaya animasi bisa diputar ulang
+  el.classList.add("flash");
+}
+
+function setFlow(connId, on){
+  $(connId).classList.toggle("flow", !!on);
+}
+
+function resetStages(){
+  for (const id of ["stageProducer","stageBroker","stageConsumer","stageDone"]){
+    $(id).classList.remove("active","done","fail");
+  }
+  setFlow("conn1", false); setFlow("conn2", false); setFlow("conn3", false);
+}
+
+// Kartu order di daftar kanan.
+function upsertOrder(o){
+  const box = $("orders");
+  const empty = box.querySelector(".line.note");
+  if (empty) empty.remove();
+
+  let row = document.getElementById("order-" + o.order_id);
+  const isNew = !row;
+  if (isNew){
+    row = document.createElement("div");
+    row.id = "order-" + o.order_id;
+    row.innerHTML = '<span class="id"></span><span class="who"></span><span class="st"></span>';
+    box.insertBefore(row, box.firstChild);
+  }
+  row.className = "order" + (isNew ? " new" : "");
+  row.querySelector(".id").textContent = o.order_id;
+  row.querySelector(".who").textContent = (o.product_name || "") +
+    (o.qty ? " ×" + o.qty : "");
+  const st = row.querySelector(".st");
+  st.className = "st " + o.status;
+  st.textContent = o.status;
+  if (isNew) setTimeout(() => row.classList.remove("new"), 800);
+  while (box.children.length > 20) box.removeChild(box.lastChild);
+}
+
+let pipelineTimer = null;
+function runPipeline(event){
+  const d = event;   // payload dari server
+  clearTimeout(pipelineTimer);
+
+  if (d.status === "queued"){
+    producerCount++;
+    $("countProducer").textContent = producerCount + " dikirim";
+    $("stageProducer").className = "stage active";
+    setFlow("conn1", true);
+    addLine($("queueLog"), "broker", d.order_id + " publish → " + d.note);
+    flash($("stageProducer"));
+
+    setTimeout(() => {
+      $("stageProducer").className = "stage done";
+      $("stageBroker").className = "stage active";
+      setFlow("conn1", false);
+      setFlow("conn2", true);
+      queueDepth = d.queue_size !== undefined ? d.queue_size : queueDepth + 1;
+      renderQueueDepth();
+      flash($("stageBroker"));
+    }, 550);
+    return;
+  }
+
+  if (d.status === "consumed"){
+    setFlow("conn2", false);
+    setFlow("conn3", true);
+    $("stageBroker").className = "stage done";
+    $("stageConsumer").className = "stage active";
+    $("countConsumer").textContent = "memproses…";
+    $("consumerSub").textContent = "sedang memproses " + d.order_id + " (3 detik)";
+    addLine($("queueLog"), "worker", d.order_id + " consumed → wait in queue " +
+      (d.wait_in_queue_ms || 0) + " ms");
+    flash($("stageConsumer"));
+
+    // Saat pesan diambil, queue berkurang satu.
+    queueDepth = Math.max(0, queueDepth - 1);
+    renderQueueDepth();
+
+    // Progress kasar di stage consumer selama 3 detik kerja worker.
+    let pct = 0;
+    pipelineTimer = setInterval(() => {
+      pct = Math.min(99, pct + 6);
+      $("countConsumer").textContent = "memproses " + pct + "%";
+      if (pct >= 99) clearInterval(pipelineTimer);
+    }, 180);
+    return;
+  }
+
+  if (d.status === "processed"){
+    clearInterval(pipelineTimer);
+    setFlow("conn3", false);
+    $("stageConsumer").classList.remove("fail");
+    $("stageConsumer").className = "stage done";
+    $("stageDone").className = "stage active";
+    doneCount++;
+    $("countDone").textContent = doneCount + " order";
+    $("countConsumer").textContent = doneCount + " selesai";
+    $("consumerSub").textContent = "mengambil pesan, prefetch 1";
+    addLine($("queueLog"), "ok", d.order_id + " processed → ack, stok sisa " +
+      d.stock_left + ", total " + d.latency_ms + " ms sejak request");
+    flash($("stageDone"));
+    setTimeout(() => {
+      if ($("stageDone").classList.contains("active")) $("stageDone").className = "stage done";
+    }, 900);
+    loadStats();
+    if (window.refreshProductLabels) window.refreshProductLabels();
+    return;
+  }
+
+  if (d.status === "failed"){
+    clearInterval(pipelineTimer);
+    // Hanya stage consumer yang ditandai gagal: broker dan producer sudah
+    // berhasil, kegagalannya terjadi saat worker memproses.
+    setFlow("conn2", false);
+    setFlow("conn3", false);
+    $("stageConsumer").className = "stage fail";
+    $("countConsumer").textContent = "gagal";
+    $("consumerSub").textContent = "pesan di-nack (requeue=false)";
+    addLine($("queueLog"), "err", d.order_id + " GAGAL → " + d.note);
+    setTimeout(() => {
+      if ($("stageConsumer").classList.contains("fail")){
+        $("stageConsumer").className = "stage";
+        $("consumerSub").textContent = "mengambil pesan, prefetch 1";
+      }
+    }, 2500);
+  }
+}
+
+async function placeOrder(){
+  const id = $("orderProduct").value;
+  const btn = $("orderBtn");
+  btn.disabled = true;
+  const t0 = performance.now();
+  const { ok, status, body } = await placeOrderSafe({ product_id: Number(id), quantity: 1 });
+  if (!ok && status === 409){
+    addLine($("queueLog"), "err", "stok tidak cukup (sisa " + (body.stock ?? 0) +
+      ") — order ditolak di handler, tidak pernah masuk queue");
+  } else if (!ok){
+    addLine($("queueLog"), "err", "order gagal: " + (body.error || ("HTTP " + status)));
+  } else {
+    const ms = Math.round(performance.now() - t0);
+    addLine($("queueLog"), "note", "POST /api/order → 202 Accepted dalam " + ms +
+      " ms · " + body.order_id);
+    // Order langsung tampil di daftar dengan status awal dari response,
+    // sebelum event konsumen datang lewat SSE.
+    upsertOrder({ order_id: body.order_id, status: body.status,
+                  product_name: "", qty: 1 });
+  }
+  btn.disabled = false;
+}
+
+async function burstOrders(){
+  const btn = $("burstBtn");
+  btn.disabled = true;
+  for (let i = 0; i < 5; i++){
+    placeOrder();
+    await sleep(120);
+  }
+  btn.disabled = false;
+}
+
+/* ---------- SSE ---------- */
+
+function connectSSE(){
+  const es = new EventSource(API_BASE + "/api/events");
+
+  es.addEventListener("open", () => {
+    $("dotSse").className = "dot on";
+    $("sseState").textContent = "aktif";
+  });
+
+  es.addEventListener("error", () => {
+    $("dotSse").className = "dot off";
+    $("sseState").textContent = "terputus, mencoba ulang";
+  });
+
+  es.addEventListener("connected", ev => {
+    const d = JSON.parse(ev.data);
+    $("sseState").textContent = "aktif";
+    $("brokerBackend").textContent = d.broker;
+    $("cacheBackend").textContent = d.cache;
+    $("dotCache").className = "dot on";
+    $("dotBroker").className = "dot on";
+    $("brokerSub").textContent = "queue: " + d.queue;
+    queueDepth = d.queue_size || 0;
+    renderQueueDepth();
+    $("orders").innerHTML = "";
+    for (const o of (d.orders || [])) upsertOrder(o);
+    if (!d.orders || d.orders.length === 0){
+      const p = document.createElement("div");
+      p.className = "line note show";
+      p.textContent = "Belum ada order.";
+      $("orders").appendChild(p);
+    }
+    addLine($("queueLog"), "note", "tersambung ke stream · broker " + d.broker + ", cache " + d.cache);
+  });
+
+  es.addEventListener("order", ev => {
+    const d = JSON.parse(ev.data);
+    runPipeline(d);
+    if (d.status === "queued" && d.product_name){
+      upsertOrder({ order_id: d.order_id, status: "queued",
+                    product_name: d.product_name, qty: d.qty });
+    } else {
+      upsertOrder({ order_id: d.order_id, status: d.status, product_name: d.product_name });
+    }
+  });
+
+  es.addEventListener("cache", ev => {
+    const d = JSON.parse(ev.data);
+    if (d.source === "invalidated"){
+      addLine($("cacheLog"), "note", "event cache · product:" + d.product_id + " invalidated");
+    } else {
+      addLine($("cacheLog"), "note", "event cache · product:" + d.product_id +
+        " dari " + d.source + " (" + d.processing_time_ms + " ms)");
+    }
+  });
+
+  es.addEventListener("queue", ev => {
+    const d = JSON.parse(ev.data);
+    queueDepth = d.queue_size || 0;
+    renderQueueDepth();
+  });
+}
+
+/* ---------- boot ---------- */
+
+$("fetchBtn").onclick = fetchProduct;
+$("evictBtn").onclick = evictProduct;
+$("orderBtn").onclick = placeOrder;
+$("burstBtn").onclick = burstOrders;
+$("resetBtn").onclick = async () => {
+  try {
+    await api("/api/reset", { method: "POST" });
+    chartPoints.length = 0;
+    producerCount = 0;
+    doneCount = 0;
+    chart.innerHTML = "";
+    resetStages();
+    $("cacheLog").innerHTML = "";
+    // Kotak kode queue ikut terhapus bersama isi log, jadi simpan referensinya
+    // dulu lalu pasang lagi. Menyusun ulang HTML-nya di sini hanya akan
+    // menghasilkan salinan yang tidak sama (dan menumpuk tiap kali Reset).
+    const code = $("codeQueue");
+    $("queueLog").innerHTML = "";
+    if (code) $("queueLog").appendChild(code);
+    $("resultBox").className = "result";
+    $("resultBadge").style.display = "none";
+    $("resultName").textContent = "Belum ada data";
+    $("resultMs").textContent = "-";
+    $("resultMs").className = "ms";
+    $("resultSub").textContent = "Tekan Fetch produk untuk memulai.";
+    addLine($("cacheLog"), "note", "cache dikosongkan, counter direset");
+    loadStats();
+  } catch (e) {
+    addLine($("cacheLog"), "err", "reset gagal: " + e.message);
+  }
+};
+
+(async function boot(){
+  await loadHealth();
+  try {
+    await loadProducts();
+  } catch (e) {
+    addLine($("queueLog"), "err", "gagal memuat produk: " + e.message);
+  }
+  connectSSE();
+  setInterval(loadStats, 3000);
+  // Health check berkala: kalau backend restart, indikator ikut pulih.
+  setInterval(loadHealth, 15000);
+})();
+</script>
+</body>
+</html>
